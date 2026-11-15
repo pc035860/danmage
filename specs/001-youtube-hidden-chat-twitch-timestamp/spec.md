@@ -35,6 +35,15 @@ origin: 2026-11-15 使用者需求（fork 自用）；參考專案 ~/git/YCS、~
 - **重播隱藏 iframe**：`live_chat_replay?v=<id>&embed_domain=…` 回「Something went wrong」，不可用；用原生 iframe 收合前的 `contentDocument.location.href`（含 continuation，路徑 `/live_chat_replay`）原樣載入，可載入、same-origin、有 `#chat #items`。該 URL 無法自行構造，內含 seek 位置，收合後就拿不到。
 - **時間同步協定**：YouTube 對原生 iframe 約每 272ms 呼叫 `contentWindow.postMessage(data, "https://www.youtube.com")`，data 只有 `{"yt-player-video-progress": <影片秒數 float>}` 與 `{"yt-player-state-change": N}`（N=3/1/2：緩衝／播放／暫停）。隱藏 iframe 載入後不送訊息，播放 10 秒仍是 0 個 renderer；每 500ms 送同形狀的 progress（值為 `video.currentTime`）後，約 4 秒有 52 個 renderer，與原生聊天室對應同一段影片時間。送合成的 progress 也能驅動（1800→51 個、1830→53 個、1900→63 個），往回送則整批重建。
 
+2026-11-15 重播隱藏 iframe 的 seek 行為（`YowU6Nn7EzY`，同一頁面內用 `postMessage` 直接驅動自建 iframe）：
+
+- 載入 `/live_chat_replay` 後 `#chat #items` **立刻存在但沒有子元素**；送 progress 才開始填。
+- **正常前進是附加**：progress 30→35→40→45→50 時，舊的元素物件保留（`firstSame: true`、前一則 `contains` 仍為 true），新的往後加。
+- **seek 是整批換掉**：`#items` 節點本身不變，但子元素全部換成新物件（`ptrContained: false`、`overlap: 0`）。往回送（600→300、300→60）與大幅往前送（0:49→14:31）都是這樣。
+- **小幅往前 seek 是附加**：60→200 秒時 `#items` 從 10 個長到 36 個，舊指標仍在容器裡，中間的訊息是「補進來」的。所以只看「指標是否脫離」攔不到往前 seek。
+- 訊息元素有穩定的 `id`（continuation 形式的 base64），但往前 seek 後整批都是新 id，靠 id 去重也攔不到。
+- 不需要 `yt-player-state-change`：只送 progress 就能驅動，暫停時不送也不會壞。
+
 2026-11-15 使用者回報「進出全螢幕時畫面上既有的彈幕被清掉再重新跑」，L3 與基準版（main `cef5c82`）對照偵錯：
 
 - **根本原因有兩層**：(1) 聊天 iframe 被清空時 `#chat #items` 是 Refresher 的必要元素，一消失就 `PlayerController.remove()`；(2) YouTube 進出全螢幕與切換劇場模式時，會把 `div#player-container`（`#movie_player` 的祖先）在 DOM 裡搬到另一個容器，瀏覽器因此取消子樹內所有進行中的 CSS transition，每個彈幕的 computed transform 瞬間變成終點值（−舊 canvas 寬度），發生在擴充功能程式碼之前。
@@ -58,11 +67,12 @@ origin: 2026-11-15 使用者需求（fork 自用）；參考專案 ~/git/YCS、~
 | D5 | Twitch 欄位 | 新增 `showTimestamp`（boolean，`DisplaySettings` index 14），預設 `true`（顯示），既有使用者行為不變；使用者關閉後才移除時間戳 | PC 2026-11-15 |
 | D6 | 時間戳與封鎖比對 | `TwitchChatContentBuilder.extractContent` 一律移除時間戳（它是中繼資料不是內容），不論開關 | 提案 |
 | D7 | 順手修的缺陷 | `refresher.ts:33-34` 缺 `contentDocument` null 保護，例外會跳過 `:272` 的 `setTimeout`，輪詢永久停止；備援改動會動到這段，一併加保護 | 提案 |
-| D8 | 重播／已結束首播 | Phase 3：同樣用隱藏 iframe。原生可用時持續記下其 `/live_chat_replay` continuation URL，收合後載入該 URL，並自己把 `video.currentTime` 以 `yt-player-video-progress` 轉送給它。不做自動展開（R4）、不自己抓重播 API（R2）。可以晚於 Phase 1、2 另開 PR | 提案 |
+| D8 | 重播／已結束首播 | Phase 3：同樣用隱藏 iframe。原生可用時持續記下其 `/live_chat_replay` continuation URL，收合後載入該 URL，並自己把 `video.currentTime` 以 `yt-player-video-progress` 轉送給它。不做自動展開（R4）、不自己抓重播 API（R2）。可以晚於 Phase 1、2 另開 PR | 已實作 |
 | D9 | `showTimestamp` 與後端 | 只存本地：`PlayerSettingsStorage.save()` 送往後端的副本拿掉 `showTimestamp`，localStorage 完整保存。原因：實測舊 descriptor 解到未知 index 14 會直接拋 `TypeError`，整包設定更新都會失敗，已登入使用者所有設定的雲端同步都會壞；自行部署帶新 descriptor 的後端後可移除這個處理 | PC 2026-11-15 |
 | D10 | 歷史訊息不噴出 | `OnPageChatPool` 新增 `backlogWindow`（只有 YouTube 聊天傳 2000ms，其他站台預設 0 不變），從 pool 建立起算，視窗內出現的訊息一律略過，並用 `MutationObserver` 追蹤游標，不依賴 `read()` 的呼叫頻率。取代原本「空容器等 2 秒再信任」的做法（Codex 審查指出等待時間無法證明歷史已載完）。代價：每次重新組裝後約 2 秒的即時訊息會被略過 | 提案 |
 | D11 | controller 不隨聊天容器重建 | `YouTubeAssembler.queryElements()` 不再回傳聊天容器，改回傳每支影片一個的 `videoToken`；`PlayerController.createYouTubeChat` 收 `getChatContainer()`；新增 `SwitchingChatPool`。行為變化：載入即收合的頁面（已結束首播、重播）現在也會出現控制按鈕與 canvas，只是沒有彈幕 | 提案（行為變化待 PC 確認） |
 | D12 | 彈幕位置用時間模型 | `DanmakuElement` 不再從 `getComputedStyle` 讀位置，因為 YouTube 搬動 `#player-container` 時瀏覽器會取消 transition、computed 值跳到終點。共用檔案，Twitch、Kick、Crunchyroll 都受影響 | 提案 |
+| D13 | 重播 seek 不噴歷史 | 重播聊天室 seek 時 `#items` 節點不變、子元素整批換成新物件；往前 seek 更只是把中間的訊息附加進來。所以「指標脫離就跳到尾端」（`skipRebuilds`）攔不到往前 seek。改由 `HiddenChatFallback` 在 progress 跳躍超過 2 秒、以及隱藏 iframe 剛建立時進入 catchingUp，用 `MutationObserver` 追蹤容器，安靜 1.5 秒後才恢復；`SwitchingChatPool.read()` 每次讀取都問 `isCatchingUp()`，期間 `skipToEnd()` 並回空。`skipRebuilds` 對原生與隱藏兩條重播路徑都開，只當作 catchingUp 的備援 | 已實作 |
 
 ## 設計
 
@@ -96,14 +106,15 @@ origin: 2026-11-15 使用者需求（fork 自用）；參考專案 ~/git/YCS、~
 - 全螢幕：進出全螢幕時 `#items` 會短暫消失約 0.5～1 秒再整批重建（見背景）。聊天容器不再是 Refresher 的必要元素（D11），controller 與已在畫面上的彈幕不被拆掉；`SwitchingChatPool` 在容器消失、重建或換來源時換掉內部的 `OnPageChatPool`（新來源套 D10 的積壓略過）；`GlobalDocuments.addDocument/removeDocument` 在聊天 iframe 換新 document 時補掛／移除 handler；換影片由 `videoToken` 觸發重建（YouTube 跨影片會沿用播放器，原本是聊天容器換了才順便重建）。
 - 彈幕位置（D12）：進出全螢幕與切換劇場模式時 YouTube 會搬動 `#player-container`，瀏覽器取消 CSS transition。`DanmakuElement` 的位置改為時間模型（起點 − 速度 × 經過時間），不再讀 `getComputedStyle`；`startTransition` 重入時先同步位置並清掉舊計時器。這個檔案 Twitch、Kick、Crunchyroll 共用。
 
-### Phase 3 — 重播／已結束首播的收合備援（提案，D8）
+### Phase 3 — 重播／已結束首播的收合備援（D8、D13）
 
 使用者在重播頁（含已結束首播）收合原生聊天室後，彈幕繼續依影片時間出現。
 
-- 捕捉：原生 `#chat #items` 存在時，Refresher 持續記下 `chatframe.contentDocument.location.href`（路徑為 `/live_chat_replay`，含 continuation）。這個 URL 不能自己構造，收合後就拿不到，所以一定要在展開狀態下記。
+- 捕捉：原生 `#chat #items` 存在時，Refresher 持續記下 `chatframe.contentDocument.location.href`（路徑為 `/live_chat_replay`，含 continuation）。這個 URL 不能自己構造，收合後就拿不到，所以一定要在展開狀態下記。**原生可用時也必須每輪呼叫 `HiddenChatFallback.query()`**，否則只有「iframe 已載入但 `#items` 還沒 render」的空窗才捕捉得到，不穩定（實作時踩過）。
 - 觸發：原生不可用、頁面沒有 `ytp-live`、且手上有記下的 `/live_chat_replay` URL，才建隱藏 iframe（隱藏方式同 D3）載入該 URL。
-- 時間同步：隱藏 iframe 不會自己前進，以約 300ms 間隔對它 `contentWindow.postMessage({"yt-player-video-progress": video.currentTime}, "https://www.youtube.com")`。`yt-player-state-change` 是否需要沒測。
-- 讀取：沿用 `OnPageChatPool` 與 `YouTubeChatContentBuilder`。seek 時 iframe 會整批重建，要確認不會把歷史訊息一次噴成彈幕。
+- 時間同步：隱藏 iframe 不會自己前進，以 300ms 間隔對它 `contentWindow.postMessage({"yt-player-video-progress": video.currentTime}, "https://www.youtube.com")`。值沒變（影片暫停）就不送，與原生行為一致。**不需要 `yt-player-state-change`**（實測）。
+- 讀取：沿用 `OnPageChatPool` 與 `YouTubeChatContentBuilder`。
+- seek（D13）：progress 跳躍超過 2 秒、以及隱藏 iframe 剛建立（它從重播開頭開始，會先補到當前位置）都視為 catchingUp；期間 `SwitchingChatPool.read()` 每幀 `skipToEnd()` 並回空，直到容器安靜 1.5 秒。另外 `skipRebuilds` 對原生與隱藏兩條重播路徑都開，處理容器整批重建。
 - 切回、清理、失敗放棄：同 Phase 2。
 - 沒記到 URL（載入即收合、從未展開）時不啟用。
 
@@ -127,7 +138,11 @@ Phase 2：
 - 備援邏輯若超過幾十行，抽成獨立檔（例如 `content_script/hidden_chat_iframe.ts`），不要塞滿 `refresher.ts`
 
 Phase 3：
-- 同上，備援檔加上 URL 捕捉與 progress 轉送；`refresher.ts` 只負責呼叫
+- `content_script/hidden_chat_fallback.ts`：`isReplayChatUrl`、`HiddenChat`（`container`／`skipRebuilds`／`isCatchingUp`）、`TimerHost`、`query()` 收 native URL、progress 轉送、catchingUp 偵測
+- `content_script/chat_pool.ts`：`ChatSource`、`NEVER_CATCHING_UP`、`SwitchingChatPool.read()` 的 catchingUp 閘門、`OnPageChatPool.skipToEnd()` 改為 public
+- `content_script/refresher.ts`：`YouTubeAssembler` 每輪呼叫 `query()`、組出 `ChatSource`
+- `content_script/player_controller.ts`：`createYouTubeChat` 收 `getChatSource`
+- `content_script/hidden_chat_fallback_test.ts`、`switching_chat_pool_test.ts`、`on_page_chat_pool_test.ts`
 
 ## 驗證與驗收
 
@@ -166,13 +181,13 @@ Phase 2：
 - [ ] YouTube 影片暫停再播放，彈幕位置接續、不往回跳（只在 Twitch 驗到；YouTube 因播放器在測試環境持續卡住而沒驗到）
 
 Phase 3：
-- [ ] 重播頁（`YowU6Nn7EzY`）展開狀態下行為不變，且 Refresher 有記下 `/live_chat_replay` URL
-- [ ] 重播頁用 UI 收合後，彈幕繼續依影片時間出現，隱藏 iframe 的 renderer 與原生聊天室對應同一段影片時間
-- [ ] 重播頁 seek（往前、往後）後彈幕跟著影片時間走，沒有歷史訊息一次噴出
-- [ ] 暫停與播放時行為正確（確認是否需要轉送 `yt-player-state-change`）
+- [x] 重播頁（`YowU6Nn7EzY`）展開狀態下行為不變，且 Refresher 有記下 `/live_chat_replay` URL
+- [x] 重播頁用 UI 收合後，彈幕繼續依影片時間出現，隱藏 iframe 的 renderer 與原生聊天室對應同一段影片時間（收合後 6 秒內 renderer 7→11，`0:49` 那則同步變成彈幕）
+- [x] 重播頁 seek（往前 200 秒、往後 20 秒）後彈幕跟著影片時間走，沒有歷史訊息一次噴出（seek 期間彈幕數維持 0，安靜後新訊息照常出現）
+- [x] 暫停與播放時行為正確：暫停 4 秒期間聊天室不前進、續播後繼續；不需要轉送 `yt-player-state-change`
 - [ ] 重播頁進出全螢幕（目前沒測過）
-- [ ] 已結束首播頁（`QOZyHyc6rVg`，載入即收合）：不啟用備援、行為與改動前一致
-- [ ] 展開後切回原生聊天室，隱藏 iframe 被移除，沒有重複彈幕
+- [x] 已結束首播頁（`QOZyHyc6rVg`，載入即收合）：不啟用備援、行為與改動前一致（無隱藏 iframe，控制按鈕與 canvas 仍在）
+- [x] 展開後切回原生聊天室，隱藏 iframe 被移除，沒有重複彈幕
 
 ## 不做的事
 
@@ -200,8 +215,13 @@ Phase 3：
 - **進行中的首播沒測到**：`QOZyHyc6rVg` 已結束，實測的是已結束首播。進行中首播的聊天室預期是 live chat，`ytp-live` 與備援是否可用未知。若不帶 `ytp-live`，D4 會讓它維持現狀（安全但沒有新功能）。
 - **載入即收合的情況**：實測存在（已結束首播頁），此時 `#chatframe` 在，所以偵測條件涵蓋它。但進行中的直播頁載入即收合是否也保有 `#chatframe`，沒測；若不存在，danmage 會落入 Structured 模式，且「沒有 `#chatframe`」是一般影片的正常狀態，不能當作聊天室被隱藏。
 - **載入即收合的重播頁拿不到 continuation URL**：Phase 3 需要在展開狀態下記 URL，已結束首播頁每次載入都預設收合，所以預設不會有。候選：fetch `watch?v=<id>&pbj=1` 解析初始 continuation（YCS `core.ts:181-238`、`chat.ts:118-177`）。該 token 是否能組成可載入的 `/live_chat_replay` URL，沒驗證。
-- **Phase 3 沒測到的**：重播頁的全螢幕；聊天密集區段的連續性（實測區段稀疏）；seek 時 YouTube 是否額外送訊息；`yt-player-state-change` 是否必要；送 progress 的最小間隔。
-- **seek 重建與歷史噴出**：往回 seek 時隱藏 iframe 整批重建，`OnPageChatPool.read` 在指標被移除時會從 `firstElementChild` 重來（`chat_pool.ts:125-129`，子 agent 靜態閱讀），可能把整批當新訊息噴出。原生重播聊天室現在是否已有同樣行為沒驗證。
+- **Phase 3 沒測到的**：重播頁的全螢幕；聊天密集區段的連續性（實測區段稀疏）；送 progress 的最小間隔。
+- **seek 重建與歷史噴出**：已由 D13 處理（catchingUp + `skipRebuilds`）。代價是 seek 後約 1.5～2 秒沒有新彈幕，且期間進來的即時訊息會被略過。原生重播聊天室（未收合）也套同一套規則，所以它的 seek 噴出也一併修了。
+- **原生重播聊天室載入時的第一批訊息**：`skipRebuilds` 對原生路徑也開，所以若 pool 建立時容器還是空的（`logElementPointer` 為 null），第一次讀取會跳到尾端，載入初期的一兩則訊息會被略過。實測重播聊天室是隨影片時間逐則附加，影響很小。
+- **原生重播聊天室的非 seek 重建**：`skipRebuilds` 假設「指標脫離＝容器整批重建＝歷史」。若 YouTube 因其他原因（換主題、resize）重建子元素，那批訊息會被靜默略過，沒驗證過。
+- **直播 DVR 期間備援可能整個停用**：若直播中往回拖時 `.ytp-time-display` 的 `ytp-live` class 消失，`replay = !isLive()` 會翻成 true 而手上沒有 `replayUrl`，`query()` 會 `stop()` 把正在運作的直播隱藏 iframe 拆掉。這是 D4 的既有行為，Phase 3 動到這段邏輯但沒改它，實測也沒驗過 DVR。
+- **catchingUp 的判定是時間窗**：progress 跳躍 >2 秒視為 seek、安靜 1.5 秒視為追平。若 YouTube 追平過程中出現 >1.5 秒的停頓，會提早恢復而噴出剩下的歷史；反之背景分頁回來時的大跳躍會被當成 seek（略過期間的訊息，預期可接受）。
+- **原生可用時必須每輪呼叫 `query()`**：實作時一度只在原生不可用時才呼叫，結果 replay URL 只在「iframe 已載入但 `#items` 還沒 render」的空窗才捕捉得到，收合後時好時壞。已修正，但這是很容易再犯的接線。
 - **協定依賴 YouTube 內部**：`yt-player-video-progress` 與 continuation URL 都不是公開介面，改版就失效。
 - **測試環境**：播放約 15 秒後常出現播放器錯誤，seek 會卡住，重播聊天室的時間同步只在片頭驗到。
 - **`embed_domain`**：實測用 `www.youtube.com` 可行，取 `location.hostname` 是否等價沒測。
@@ -220,3 +240,5 @@ Phase 3：
 - 2026-11-15：status 改 in_progress。PC 指示開新 branch、先做 Phase 1 + 2（Phase 3 延後）、驗收走 verify-code-change；目前沒有要 PR 回上游
 - 2026-11-15：補全螢幕與重播隱藏 iframe 的實測結果；新增 D8 與 Phase 3（提案）；D4 限定為 Phase 2；「不做的事」記入 R4（PC 否決）與 R2，因為使用者不要調整原生功能，且實測 `postMessage` 轉送時間可行
 - 2026-11-15：依已結束首播與重播的實測，D4 改為以 `.ytp-time-display.ytp-live` 判斷進行中的直播才啟用備援，因為 `live_chat?v=` 對已結束內容回「聊天室已停用」；背景補實測結果、改寫 Open questions 與驗收項
+- 2026-11-15：Phase 3 實作完成（未 commit）。新增 D13（seek 不噴歷史：catchingUp + `skipRebuilds`），背景補重播隱藏 iframe 的 seek 實測（正常前進是附加、seek 是整批換、小幅往前 seek 也是附加），改寫 Phase 3 設計與改動清單；單元測試 11 個檔案全過，實機驗證收合／展開／往前往後 seek／暫停續播／已結束首播載入即收合
+- 2026-11-15：review-loop（glm）三輪，0 blocker。第一輪修正：replay frame 建立時就進入 catchingUp（初始填充原本只靠 `skipRebuilds` + `backlogWindow`）、`syncSource()` 補註解說明 `isCatchingUp` 不參與相等判斷、spec 改正「`skipRebuilds` 只對隱藏 iframe 生效」的錯誤描述（實際兩條重播路徑都開）。第二輪修正：容器首次出現時重設 `lastMessageAt`，補上「frame 載入超過 1.5 秒才出現容器」的窄縫；修正註解對 continuation URL 起點的描述

@@ -13,7 +13,7 @@
 - 安裝與建置：`npm ci`；`npm run ext_linux` 產生 `chrome_extension_bin/`（gitignored，載入未封裝項目；會直接連 PROD 後端 www.danmage.com）。Firefox 用 `npm run ext_firefox_linux_zip`
 - 重新產生 `interface/*.ts`：`node_modules/.bin/geneage interface/<name>.yaml`，不要手改 `.ts`
 - 單元測試（沒有 `test` script）：`CHROME=<Chrome 執行檔> node_modules/.bin/bundage prun <測試檔路徑，不含 .ts>`
-- `tsc --noEmit -p tsconfig.json` 在 `frontend/web`、`script/` 有既存錯誤，與擴充功能無關；改動範圍內應為 0
+- `tsc --noEmit -p tsconfig.json` 在 `script/` 有既存錯誤，與擴充功能無關；改動範圍內應為 0
 
 ## 慣例與地雷
 
@@ -22,11 +22,13 @@
 - YouTube 聊天 iframe 在收合、進出全螢幕時會被清空再重建。聊天容器不能當 Refresher 的必要元素，否則 PlayerController 整個重建、畫面上的彈幕全被拆掉；改由 `SwitchingChatPool` 換來源。YouTube 跨影片會沿用播放器，換影片靠 `videoToken` 觸發重建
 - YouTube 進出全螢幕與切劇場模式時會搬動 `#player-container`，瀏覽器取消所有 CSS transition，computed transform 跳到終點。彈幕位置不要讀 `getComputedStyle`；`DanmakuElement` 用「起點 − 速度 × 時間」，且四個站台共用
 - 新容器出現後 `OnPageChatPool` 會略過 2 秒內出現的訊息（`backlogWindow`，只有 YouTube 聊天傳值），否則剛渲染的聊天室歷史會被當成新彈幕噴出
-- 聊天室隱藏備援（`hidden_chat_fallback.ts`）只用於進行中的直播（`.ytp-time-display` 帶 `ytp-live`）；`live_chat?v=` 對重播與已結束首播回「聊天室已停用」。重播備援還沒做，見 `specs/001-*/spec.md` 的 Phase 3
+- 聊天室隱藏備援（`hidden_chat_fallback.ts`）兩條路：進行中直播（`.ytp-time-display.ytp-live`）用 `live_chat?v=`；重播用展開時捕捉到的 `/live_chat_replay` URL，自己送 `yt-player-video-progress` 驅動。載入即收合的重播頁拿不到 URL，不啟用。**原生可用時也要每輪呼叫 `query()`**，否則 URL 只在 iframe 已載入但 `#items` 還沒 render 的空窗才捕捉得到
+- 重播聊天室 seek 時 `#items` 節點不變、子元素整批換掉，小幅往前 seek 甚至只是附加中間訊息。靠 `HiddenChatFallback` 的 catchingUp（progress 跳躍 >2 秒或 frame 剛建立 → 容器安靜 1.5 秒）攔，`skipRebuilds` 只是備援
 - 用 agent-browser 實機驗證 YouTube：要帶一般 Chrome 的 `--user-agent`（HeadlessChrome 會顯示「舊版瀏覽器」）、用 `--extension` 載入、`--mute-audio`；彈幕只在影片播放中才會出
 
 ## Recent Significant Changes
 
+- 重播／已結束首播收合聊天室後也有彈幕：隱藏 iframe 載入捕捉到的 `/live_chat_replay` URL，自己轉送 `video.currentTime`；seek 不會噴歷史
 - Twitch 新增 `showTimestamp`（預設顯示，只存本地、不送後端），可關掉彈幕裡的聊天室時間戳
 - YouTube 進行中直播收合聊天室時，改由隱藏 iframe 備援讀聊天室，彈幕不中斷
 - 聊天容器不再是 Refresher 必要元素，進出全螢幕時 controller 與畫面上的彈幕不被拆掉
