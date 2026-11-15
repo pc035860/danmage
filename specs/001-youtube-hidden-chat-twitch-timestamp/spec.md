@@ -168,9 +168,9 @@ Phase 2：
 - [x] 一般影片（沒有聊天面板、走 Structured 模式）行為與改動前一致（`jNQXAC9IVRw`：無 `#chatframe`、無隱藏 iframe、控制面板可開且四個分頁都在、console 無錯誤）
 - [x] 重播頁（`YowU6Nn7EzY`）與已結束首播頁（`QOZyHyc6rVg`）：行為與改動前一致，不建立隱藏 iframe
 - [ ] 進行中的首播（需要一場正在進行的）：`ytp-live` 有無、收合時備援是否運作，結果記回 spec
-- [ ] 直播中往回拖（DVR）後收合聊天室：備援仍運作，或行為在 Open questions 中記明
-- [ ] 進行中的直播頁載入時就已收合：`#chatframe` 是否存在，結果記回 spec
-- [ ] 收合 10 分鐘以上仍持續收到訊息（目前只實測 28 秒）
+- [x] 直播中往回拖（DVR）後收合聊天室：備援仍運作（`qH2Uv2OXYrs` 收合後往回拖 60 秒：`ytp-live` 全程保留、隱藏 iframe 維持 1 個、renderer 73→74、新訊息照常出彈幕）
+- [x] 進行中的直播頁載入時就已收合：`#chatframe` 是否存在，結果記回 spec（實測 reload 後直播頁不會保持收合，正常路徑下做不出這個情境；已結束首播頁是唯一観察到的情況，那時 `#chatframe` 存在）
+- [x] 收合 10 分鐘以上仍持續收到訊息（`qH2Uv2OXYrs` 收合後 10 分鐘每 60 秒取樣：隱藏 iframe 全程 1 個，renderer 82→84→86→88→96→101→105→120→137→144→149 持續成長；但測試環境的播放器第 2 分鐘就重置到 t=0 並暫停，所以彈幕渲染本身沒能連續観察）
 - [ ] 登入狀態下重做收合／展開流程（目前只測匿名）
 - [x] `showChatWindow` 開關行為不變
 - [x] 直播頁進出全螢幕：空窗期後彈幕自動恢復，沒有歷史訊息噴出，沒有殘留隱藏 iframe
@@ -211,15 +211,15 @@ Phase 3：
 - **D11 的行為變化沒有經過使用者確認**：載入即收合的重播與已結束首播頁，現在也會出現控制按鈕與 canvas。
 - **收合路徑只模擬過**：實測是移除 `#show-hide-button` 的 `hidden` 再點它，沒有走真實 UI；匿名版面沒有可見的隱藏按鈕。需要在有該按鈕的版面（登入後或不同版面）重驗。
 - **現況沒有直播／重播判斷**：2026-11-15 grep `replay|premiere|live_chat|isLive|ytInitial|upcoming` 在 `content_script` 零命中，只有 `video_id_extractor.ts:33` 取 `v` 參數。Chat 模式下直播、首播、重播都是讀 `#chat #items`。
-- **`ytp-live` 的證據較弱**：直播頁的 `.ytp-time-display.ytp-live` 是用 4 支直播（含 `lofi hip hop radio`）驗的，但播放沒真的起來，只有靜態 class 證據。在直播中往回拖（DVR）時 class 會不會消失沒測；若會消失，備援會在這段時間失效。實作後要驗。
+- **`ytp-live` 的證據**：直播頁的 `.ytp-time-display.ytp-live` 是用 4 支直播（含 `lofi hip hop radio`）驗的。2026-11-15 在 `qH2Uv2OXYrs`（3:46 的直播、DVR 窗 3.7 小時）往回拖 60 秒後，`ytp-live` 全程保留、時間列仍顯示「直播中•觀看直播」，所以 DVR 不會讓備援失效。
 - **進行中的首播沒測到**：`QOZyHyc6rVg` 已結束，實測的是已結束首播。進行中首播的聊天室預期是 live chat，`ytp-live` 與備援是否可用未知。若不帶 `ytp-live`，D4 會讓它維持現狀（安全但沒有新功能）。
-- **載入即收合的情況**：實測存在（已結束首播頁），此時 `#chatframe` 在，所以偵測條件涵蓋它。但進行中的直播頁載入即收合是否也保有 `#chatframe`，沒測；若不存在，danmage 會落入 Structured 模式，且「沒有 `#chatframe`」是一般影片的正常狀態，不能當作聊天室被隱藏。
+- **載入即收合的情況**：實測存在（已結束首播頁），此時 `#chatframe` 在，所以偵測條件涵蓋它。2026-11-15 補測：直播頁收合後 reload 會回到展開（與重播頁一樣不記住收合），所以正常路徑下做不出「直播頁載入即收合」；若真的發生（例如 YouTube 改行為），`#chatframe` 在不在仍未驗，不在的話 danmage 會落入 Structured 模式。
 - **載入即收合的重播頁拿不到 continuation URL**：Phase 3 需要在展開狀態下記 URL，已結束首播頁每次載入都預設收合，所以預設不會有。候選：fetch `watch?v=<id>&pbj=1` 解析初始 continuation（YCS `core.ts:181-238`、`chat.ts:118-177`）。該 token 是否能組成可載入的 `/live_chat_replay` URL，沒驗證。
 - **Phase 3 沒測到的**：重播頁的全螢幕；聊天密集區段的連續性（實測區段稀疏）；送 progress 的最小間隔。
 - **seek 重建與歷史噴出**：已由 D13 處理（catchingUp + `skipRebuilds`）。代價是 seek 後約 1.5～2 秒沒有新彈幕，且期間進來的即時訊息會被略過。原生重播聊天室（未收合）也套同一套規則，所以它的 seek 噴出也一併修了。
 - **原生重播聊天室載入時的第一批訊息**：`skipRebuilds` 對原生路徑也開，所以若 pool 建立時容器還是空的（`logElementPointer` 為 null），第一次讀取會跳到尾端，載入初期的一兩則訊息會被略過。實測重播聊天室是隨影片時間逐則附加，影響很小。
 - **原生重播聊天室的非 seek 重建**：`skipRebuilds` 假設「指標脫離＝容器整批重建＝歷史」。若 YouTube 因其他原因（換主題、resize）重建子元素，那批訊息會被靜默略過，沒驗證過。
-- **直播 DVR 期間備援可能整個停用**：若直播中往回拖時 `.ytp-time-display` 的 `ytp-live` class 消失，`replay = !isLive()` 會翻成 true 而手上沒有 `replayUrl`，`query()` 會 `stop()` 把正在運作的直播隱藏 iframe 拆掉。這是 D4 的既有行為，Phase 3 動到這段邏輯但沒改它，實測也沒驗過 DVR。
+- **直播 DVR 期間備援**：2026-11-15 實測 `qH2Uv2OXYrs` 往回拖 60 秒，`ytp-live` 保留、備援照常運作，所以原本担心的「`replay = !isLive()` 翻成 true 而拆掉直播 iframe」沒有發生。但更長的 DVR（例如拖到直播開始）沒測。
 - **catchingUp 的判定是時間窗**：progress 跳躍 >2 秒視為 seek、安靜 1.5 秒視為追平。若 YouTube 追平過程中出現 >1.5 秒的停頓，會提早恢復而噴出剩下的歷史；反之背景分頁回來時的大跳躍會被當成 seek（略過期間的訊息，預期可接受）。
 - **原生可用時必須每輪呼叫 `query()`**：實作時一度只在原生不可用時才呼叫，結果 replay URL 只在「iframe 已載入但 `#items` 還沒 render」的空窗才捕捉得到，收合後時好時壞。已修正，但這是很容易再犯的接線。
 - **協定依賴 YouTube 內部**：`yt-player-video-progress` 與 continuation URL 都不是公開介面，改版就失效。
