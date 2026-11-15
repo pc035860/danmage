@@ -1,7 +1,12 @@
 import { ChatEntry, HostApp } from "../../../interface/chat_entry";
 import { PlayerSettings } from "../../../interface/player_settings";
 import { newGetChatRequest, newPostChatRequest } from "../../client_requests";
-import { ChatPool, OnPageChatPool, StructuredChatPool } from "./chat_pool";
+import {
+  ChatPool,
+  OnPageChatPool,
+  StructuredChatPool,
+  SwitchingChatPool,
+} from "./chat_pool";
 import {
   ChatWindowToggler,
   NoopChatWindowToggler,
@@ -72,7 +77,7 @@ export class PlayerController {
     video: HTMLVideoElement,
     canvas: HTMLElement,
     anchorButtonElement: Element,
-    chatContainer: Element,
+    getChatContainer: () => Element | null,
     chatWindowContainers: Array<HTMLElement>,
     globalDocuments: GlobalDocuments,
     playerSettings: PlayerSettings,
@@ -102,7 +107,11 @@ export class PlayerController {
       ),
       controlPanel,
       ControlPanelOneTimeAttacher.create(controlPanel, anchorButtonElement),
-      new OnPageChatPool(chatContainer, blockPatternTester),
+      new SwitchingChatPool(
+        getChatContainer,
+        blockPatternTester,
+        PlayerController.YOUTUBE_CHAT_BACKLOG_WINDOW,
+      ),
       NoopVideoIdExtractor.create(),
     );
   }
@@ -248,6 +257,7 @@ export class PlayerController {
   }
 
   private static HAVE_NOTHING = 0;
+  private static YOUTUBE_CHAT_BACKLOG_WINDOW = 2000; // ms
 
   private videoId: string;
   private addChatsCycleId: number;

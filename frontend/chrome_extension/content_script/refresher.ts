@@ -1,5 +1,6 @@
 import { PlayerSettings } from "../../../interface/player_settings";
 import { GlobalDocuments } from "./common/global_documents";
+import { HiddenChatFallback } from "./hidden_chat_fallback";
 import { PlayerController } from "./player_controller";
 
 export interface Assembler {
@@ -12,12 +13,25 @@ export class YouTubeAssembler implements Assembler {
   public assemble: () => void;
   private canvas: HTMLElement;
   private video: HTMLVideoElement;
-  private chatContainer: Element;
+  // Not one of the required elements: YouTube blanks and rebuilds its chat
+  // iframe (collapsing the chat, entering fullscreen), and the controller,
+  // including the danmaku already on screen, must survive that.
+  private chatContainer: Element | null = null;
+  private chatDocument: Document | null = null;
   private anchorButtonElement: Element;
-  private iframeDocument: Document;
   private chatWindowContainer1: HTMLElement;
   private chatWindowContainer2: HTMLElement;
   private playController: PlayerController;
+  private globalDocuments: GlobalDocuments | undefined;
+  private registeredChatDocument: Document | null = null;
+  // YouTube reuses the player across navigations, so nothing else tells the
+  // Refresher that a new video has begun. A fresh element for every video makes
+  // it rebuild the controller, which drops the previous video's danmaku.
+  private videoId: string | null | undefined;
+  private videoToken: Element;
+  // Lives across remove() on purpose: the hidden iframe must outlast the
+  // controller being torn down and rebuilt.
+  private hiddenChat = HiddenChatFallback.create();
 
   public constructor(private playerSettings: PlayerSettings) {}
 
@@ -27,25 +41,57 @@ export class YouTubeAssembler implements Assembler {
     this.anchorButtonElement = document.querySelector(".ytp-settings-button");
     let chatIframe = document.getElementById("chatframe") as HTMLIFrameElement;
     if (!chatIframe) {
+      this.hiddenChat.reset();
+      this.chatContainer = null;
+      this.chatDocument = null;
       this.assemble = this.assembleStructured;
       return [this.canvas, this.video, this.anchorButtonElement];
     } else {
-      this.iframeDocument = chatIframe.contentDocument;
-      this.chatContainer = this.iframeDocument.querySelector("#chat #items");
+      let nativeDocument = chatIframe.contentDocument;
+      let nativeChatContainer =
+        nativeDocument?.querySelector("#chat #items") ?? null;
+      let hiddenChatContainer = this.hiddenChat.query(
+        nativeChatContainer !== null,
+      );
+      this.chatContainer = nativeChatContainer ?? hiddenChatContainer;
+      this.chatDocument = nativeChatContainer ? nativeDocument : null;
+      this.syncChatDocument();
       this.chatWindowContainer1 = document.getElementById("chat-container");
       this.chatWindowContainer2 = document.getElementById(
         "panels-full-bleed-container",
       );
+      let videoId = new URLSearchParams(window.location.search).get("v");
+      if (!this.videoToken || videoId !== this.videoId) {
+        this.videoId = videoId;
+        this.videoToken = document.createElement("span");
+      }
       this.assemble = this.assembleChat;
       return [
         this.canvas,
         this.video,
-        this.chatContainer,
         this.anchorButtonElement,
         this.chatWindowContainer1,
         this.chatWindowContainer2,
+        this.videoToken,
       ];
     }
+  }
+
+  // The chat iframe gets a new document every time it is rebuilt.
+  private syncChatDocument(): void {
+    if (
+      !this.globalDocuments ||
+      this.chatDocument === this.registeredChatDocument
+    ) {
+      return;
+    }
+    if (this.registeredChatDocument) {
+      this.globalDocuments.removeDocument(this.registeredChatDocument);
+    }
+    if (this.chatDocument) {
+      this.globalDocuments.addDocument(this.chatDocument);
+    }
+    this.registeredChatDocument = this.chatDocument;
   }
 
   public assembleStructured(): void {
@@ -59,18 +105,22 @@ export class YouTubeAssembler implements Assembler {
   }
 
   public assembleChat(): void {
+    this.globalDocuments = GlobalDocuments.create([document]);
+    this.registeredChatDocument = null;
+    this.syncChatDocument();
     this.playController = PlayerController.createYouTubeChat(
       this.video,
       this.canvas,
       this.anchorButtonElement,
-      this.chatContainer,
+      () => this.chatContainer,
       [this.chatWindowContainer1, this.chatWindowContainer2],
-      GlobalDocuments.create([document, this.iframeDocument]),
+      this.globalDocuments,
       this.playerSettings,
     );
   }
 
   public remove(): void {
+    this.globalDocuments = undefined;
     if (this.playController) {
       this.playController.remove();
       this.playController = undefined;

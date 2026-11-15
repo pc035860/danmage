@@ -98,15 +98,103 @@ export class StructuredChatPool implements ChatPool {
   }
 }
 
+// Reads from whichever chat container is current, so the container can come
+// and go (YouTube blanks and rebuilds its chat iframe) without tearing down
+// everything that depends on this pool.
+export class SwitchingChatPool implements ChatPool {
+  private container: Element | null = null;
+  private pool: OnPageChatPool | undefined;
+
+  public constructor(
+    private getChatContainer: () => Element | null,
+    private blockTester: BlockPatternTester,
+    private backlogWindow: number,
+    private now: () => number = () => Date.now(),
+  ) {}
+
+  public fill(): void {
+    // Do nothing.
+  }
+
+  public clear(): void {
+    // Do nothing.
+  }
+
+  public start(): void {
+    this.syncContainer();
+    this.pool?.start();
+  }
+
+  public read(): Array<ChatEntry> {
+    this.syncContainer();
+    return this.pool ? this.pool.read() : [];
+  }
+
+  private syncContainer(): void {
+    let container = this.getChatContainer();
+    if (container === this.container) {
+      return;
+    }
+    this.container = container;
+    this.pool?.dispose();
+    this.pool = container
+      ? new OnPageChatPool(
+          container,
+          this.blockTester,
+          this.backlogWindow,
+          this.now,
+        )
+      : undefined;
+    this.pool?.start();
+  }
+}
+
 export class OnPageChatPool implements ChatPool {
   private static TW_HIDE_CLASS = "tw-hide";
 
   private logElementPointer: Element;
+  private createdAt: number;
+  private observer: MutationObserver | undefined;
 
+  // Chat that shows up within `backlogWindow` ms of creation is treated as
+  // backlog and skipped. A freshly rendered container may be empty at first
+  // and filled with the existing backlog a moment later, which must not be
+  // played as new chat. Reads can stall (e.g. animation frames pause in a
+  // background tab), so the skipping is driven by the container itself.
   public constructor(
     private chatContainer: Element,
     private blockTester: BlockPatternTester,
-  ) {}
+    private backlogWindow = 0, // ms
+    private now: () => number = () => Date.now(),
+  ) {
+    this.createdAt = this.now();
+    if (this.backlogWindow > 0) {
+      this.observer = new MutationObserver(() => {
+        if (this.isInBacklogWindow()) {
+          this.skipToEnd();
+        } else {
+          this.dispose();
+        }
+      });
+      this.observer.observe(this.chatContainer, { childList: true });
+    }
+  }
+
+  public dispose(): void {
+    this.observer?.disconnect();
+    this.observer = undefined;
+  }
+
+  private isInBacklogWindow(): boolean {
+    return this.now() - this.createdAt < this.backlogWindow;
+  }
+
+  private skipToEnd(): void {
+    let lastElement = this.chatContainer.lastElementChild;
+    if (lastElement) {
+      this.logElementPointer = lastElement;
+    }
+  }
 
   public fill(): void {
     // Do nothing.
@@ -121,6 +209,11 @@ export class OnPageChatPool implements ChatPool {
   }
 
   public read(): Array<ChatEntry> {
+    if (this.isInBacklogWindow()) {
+      this.skipToEnd();
+      return [];
+    }
+
     let nextLogElementPointer: Element;
     if (this.chatContainer.contains(this.logElementPointer)) {
       nextLogElementPointer = this.logElementPointer.nextElementSibling;
