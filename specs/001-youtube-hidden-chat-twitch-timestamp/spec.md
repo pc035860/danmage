@@ -154,7 +154,7 @@ Phase 1：
 - [x] 後端回傳的設定沒有此欄位時，合併結果為 `true` 而不是被反序列化成 `false`
 - [x] 切換開關後，畫面上已存在的彈幕立即更新
 - [x] 重新整理頁面後設定保留（`localStorage["PlayerSettings"]`）
-- [ ] 封鎖關鍵字（含純數字或 `:`）不會比對到時間戳（單元測試只證明 `extractContent` 會移除時間戳，沒有實機驗過封鎖路徑）
+- [x] 封鎖關鍵字（含純數字或 `:`）不會比對到時間戳（`greentea` 直播、Twitch 時間戳開啟、關鍵字 `:` 與 `7` 同時開著：21 個彈幕裡 0 個含 `7`，證明封鎖器生效；含 `2:44` 時間戳的彈幕照樣出現，證明時間戳的 `:` 沒被比對到）
 - [x] 重設設定會把 `showTimestamp` 還原
 - [x] `chat_content_builder_test.ts` 通過，測試在此環境以 `CHROME=… bundage prun <測試檔>` 可跑
 - [ ] 登入狀態下，設定更新請求不含 `showTimestamp`（單元測試已涵蓋 `save()`；匿名狀態下請求在送出前就因無授權失敗，實機觀察不到）
@@ -164,8 +164,8 @@ Phase 2：
 - [x] 用真實 UI 路徑收合原生聊天室後，彈幕持續出現，`iframe[data-danmage-hidden-chat]` 存在且其 renderer 數量成長
 - [x] 收合瞬間與展開瞬間，沒有歷史訊息一次噴出
 - [x] 展開後切回原生聊天室、隱藏 iframe 被移除，沒有重複彈幕
-- [ ] 收合狀態下經 SPA 導航到另一支影片，隱藏 iframe 被清掉且不殘留輪詢
-- [ ] 一般影片（沒有聊天面板、走 Structured 模式）行為與改動前一致
+- [x] 收合狀態下經 SPA 導航到另一支影片，隱藏 iframe 被清掉且不殘留輪詢（`YowU6Nn7EzY` 收合後點推薦影片 → `_VkPrWc5E0E`，隱藏 iframe 數 1→0、舊節點 `isConnected=false`，新頁面走 Structured 模式、無殘留彈幕）
+- [x] 一般影片（沒有聊天面板、走 Structured 模式）行為與改動前一致（`jNQXAC9IVRw`：無 `#chatframe`、無隱藏 iframe、控制面板可開且四個分頁都在、console 無錯誤）
 - [x] 重播頁（`YowU6Nn7EzY`）與已結束首播頁（`QOZyHyc6rVg`）：行為與改動前一致，不建立隱藏 iframe
 - [ ] 進行中的首播（需要一場正在進行的）：`ytp-live` 有無、收合時備援是否運作，結果記回 spec
 - [ ] 直播中往回拖（DVR）後收合聊天室：備援仍運作，或行為在 Open questions 中記明
@@ -178,14 +178,14 @@ Phase 2：
 - [x] 換影片（SPA）時舊彈幕被清掉；全螢幕重建後點聊天室仍能收起控制面板選單
 - [x] 彈幕壽命與 (畫布寬度＋彈幕寬度)／速度 一致（YouTube 8 個、Twitch 80 個，差 0.0 秒）；Twitch 彈幕正常出現、飄過、被移除
 - [ ] 進出全螢幕後前 3 秒新增彈幕數與穩態同一量級（L3 實測 0～5 個、約 +2.8～4.0 秒才開始，原因是 D10 的 2 秒視窗加上約 0.7 秒的容器空窗，是設計代價；見 Open questions）
-- [ ] YouTube 影片暫停再播放，彈幕位置接續、不往回跳（只在 Twitch 驗到；YouTube 因播放器在測試環境持續卡住而沒驗到）
+- [x] YouTube 影片暫停再播放，彈幕位置接續、不往回跳（重播頁：播放中 x=814，暫停 1.5 秒期間凍結在 811，續播 711→608→504 接續前進）
 
 Phase 3：
 - [x] 重播頁（`YowU6Nn7EzY`）展開狀態下行為不變，且 Refresher 有記下 `/live_chat_replay` URL
 - [x] 重播頁用 UI 收合後，彈幕繼續依影片時間出現，隱藏 iframe 的 renderer 與原生聊天室對應同一段影片時間（收合後 6 秒內 renderer 7→11，`0:49` 那則同步變成彈幕）
 - [x] 重播頁 seek（往前 200 秒、往後 20 秒）後彈幕跟著影片時間走，沒有歷史訊息一次噴出（seek 期間彈幕數維持 0，安靜後新訊息照常出現）
 - [x] 暫停與播放時行為正確：暫停 4 秒期間聊天室不前進、續播後繼續；不需要轉送 `yt-player-state-change`
-- [ ] 重播頁進出全螢幕（目前沒測過）
+- [x] 重播頁進出全螢幕（`YowU6Nn7EzY` 收合狀態：進入後 canvas 815→1920、隱藏 iframe 全程 1 個、renderer 7→9；離開後 canvas 1920→1333→815，彈幕數最大 1、無歷史噴出）
 - [x] 已結束首播頁（`QOZyHyc6rVg`，載入即收合）：不啟用備援、行為與改動前一致（無隱藏 iframe，控制按鈕與 canvas 仍在）
 - [x] 展開後切回原生聊天室，隱藏 iframe 被移除，沒有重複彈幕
 
@@ -242,3 +242,4 @@ Phase 3：
 - 2026-11-15：依已結束首播與重播的實測，D4 改為以 `.ytp-time-display.ytp-live` 判斷進行中的直播才啟用備援，因為 `live_chat?v=` 對已結束內容回「聊天室已停用」；背景補實測結果、改寫 Open questions 與驗收項
 - 2026-11-15：Phase 3 實作完成（未 commit）。新增 D13（seek 不噴歷史：catchingUp + `skipRebuilds`），背景補重播隱藏 iframe 的 seek 實測（正常前進是附加、seek 是整批換、小幅往前 seek 也是附加），改寫 Phase 3 設計與改動清單；單元測試 11 個檔案全過，實機驗證收合／展開／往前往後 seek／暫停續播／已結束首播載入即收合
 - 2026-11-15：review-loop（glm）三輪，0 blocker。第一輪修正：replay frame 建立時就進入 catchingUp（初始填充原本只靠 `skipRebuilds` + `backlogWindow`）、`syncSource()` 補註解說明 `isCatchingUp` 不參與相等判斷、spec 改正「`skipRebuilds` 只對隱藏 iframe 生效」的錯誤描述（實際兩條重播路徑都開）。第二輪修正：容器首次出現時重設 `lastMessageAt`，補上「frame 載入超過 1.5 秒才出現容器」的窄縫；修正註解對 continuation URL 起點的描述
+- 2026-11-15：實機補驗 5 項（一般影片 Structured、收合狀態下 SPA 導航、重播頁進出全螢幕、Twitch 封鎖路徑、YouTube 暫停續播），全數通過並勾選；剩 7 項需要登入、進行中的直播／首播，或屬 D10 的設計代價
