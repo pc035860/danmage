@@ -8,7 +8,10 @@ class Fixture {
   public time = 0;
   public container = document.createElement("div");
 
-  public constructor(private backlogWindow?: number) {}
+  public constructor(
+    private backlogWindow?: number,
+    private skipRebuilds = false,
+  ) {}
 
   public createPool(): OnPageChatPool {
     let blockPatternTester = new (class extends MockBlockPatternTester {
@@ -21,6 +24,7 @@ class Fixture {
       blockPatternTester,
       this.backlogWindow,
       () => this.time,
+      this.skipRebuilds,
     );
   }
 
@@ -200,6 +204,83 @@ TEST_RUNNER.run({
 
         // Verify
         assertThat(contents(readed), isArray([eq("first")]), "read contents");
+      },
+    },
+    {
+      name: "SkipsTheFirstFillOfAReplayChat",
+      execute: () => {
+        // Prepare
+        let fixture = new Fixture(undefined, true);
+        let chatPool = fixture.createPool();
+        chatPool.start();
+
+        // Execute
+        fixture.addMessage("history 1");
+        fixture.addMessage("history 2");
+        let readedHistory = chatPool.read();
+        fixture.addMessage("live");
+        let readedLive = chatPool.read();
+
+        // Verify
+        assertThat(contents(readedHistory), isArray([]), "read history");
+        assertThat(contents(readedLive), isArray([eq("live")]), "read live");
+      },
+    },
+    {
+      name: "SkipsTheRebuiltListOfAReplayChat",
+      execute: () => {
+        // Prepare
+        let fixture = new Fixture(undefined, true);
+        let chatPool = fixture.createPool();
+        chatPool.start();
+        fixture.addMessage("history");
+        chatPool.read();
+        fixture.addMessage("live");
+        assertThat(
+          contents(chatPool.read()),
+          isArray([eq("live")]),
+          "read before rebuild",
+        );
+
+        // Execute
+        fixture.container.innerHTML = "";
+        fixture.addMessage("rebuilt 1");
+        fixture.addMessage("rebuilt 2");
+        let readedRebuild = chatPool.read();
+        fixture.addMessage("live again");
+        let readedLive = chatPool.read();
+
+        // Verify
+        assertThat(contents(readedRebuild), isArray([]), "read rebuild");
+        assertThat(
+          contents(readedLive),
+          isArray([eq("live again")]),
+          "read live",
+        );
+      },
+    },
+    {
+      name: "ReadsEverythingAfterARebuildWithoutSkipRebuilds",
+      execute: () => {
+        // Prepare
+        let fixture = new Fixture();
+        let chatPool = fixture.createPool();
+        chatPool.start();
+        fixture.addMessage("history");
+        chatPool.read();
+
+        // Execute
+        fixture.container.innerHTML = "";
+        fixture.addMessage("rebuilt 1");
+        fixture.addMessage("rebuilt 2");
+        let readedRebuild = chatPool.read();
+
+        // Verify
+        assertThat(
+          contents(readedRebuild),
+          isArray([eq("rebuilt 1"), eq("rebuilt 2")]),
+          "read rebuild",
+        );
       },
     },
   ],

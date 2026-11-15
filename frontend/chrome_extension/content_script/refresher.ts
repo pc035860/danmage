@@ -1,6 +1,7 @@
 import { PlayerSettings } from "../../../interface/player_settings";
+import { ChatSource, NEVER_CATCHING_UP } from "./chat_pool";
 import { GlobalDocuments } from "./common/global_documents";
-import { HiddenChatFallback } from "./hidden_chat_fallback";
+import { HiddenChatFallback, isReplayChatUrl } from "./hidden_chat_fallback";
 import { PlayerController } from "./player_controller";
 
 export interface Assembler {
@@ -16,7 +17,7 @@ export class YouTubeAssembler implements Assembler {
   // Not one of the required elements: YouTube blanks and rebuilds its chat
   // iframe (collapsing the chat, entering fullscreen), and the controller,
   // including the danmaku already on screen, must survive that.
-  private chatContainer: Element | null = null;
+  private chatSource: ChatSource | null = null;
   private chatDocument: Document | null = null;
   private anchorButtonElement: Element;
   private chatWindowContainer1: HTMLElement;
@@ -31,7 +32,9 @@ export class YouTubeAssembler implements Assembler {
   private videoToken: Element;
   // Lives across remove() on purpose: the hidden iframe must outlast the
   // controller being torn down and rebuilt.
-  private hiddenChat = HiddenChatFallback.create();
+  private hiddenChat = HiddenChatFallback.create(
+    () => this.video?.currentTime ?? 0,
+  );
 
   public constructor(private playerSettings: PlayerSettings) {}
 
@@ -42,18 +45,28 @@ export class YouTubeAssembler implements Assembler {
     let chatIframe = document.getElementById("chatframe") as HTMLIFrameElement;
     if (!chatIframe) {
       this.hiddenChat.reset();
-      this.chatContainer = null;
+      this.chatSource = null;
       this.chatDocument = null;
       this.assemble = this.assembleStructured;
       return [this.canvas, this.video, this.anchorButtonElement];
     } else {
       let nativeDocument = chatIframe.contentDocument;
+      let nativeChatUrl = nativeDocument?.location.href;
       let nativeChatContainer =
         nativeDocument?.querySelector("#chat #items") ?? null;
-      let hiddenChatContainer = this.hiddenChat.query(
+      // Always asked, so that the replay continuation URL is captured while
+      // YouTube's own chat is still up.
+      let hiddenChat = this.hiddenChat.query(
         nativeChatContainer !== null,
+        nativeChatUrl,
       );
-      this.chatContainer = nativeChatContainer ?? hiddenChatContainer;
+      this.chatSource = nativeChatContainer
+        ? {
+            container: nativeChatContainer,
+            skipRebuilds: isReplayChatUrl(nativeChatUrl),
+            isCatchingUp: NEVER_CATCHING_UP,
+          }
+        : hiddenChat;
       this.chatDocument = nativeChatContainer ? nativeDocument : null;
       this.syncChatDocument();
       this.chatWindowContainer1 = document.getElementById("chat-container");
@@ -112,7 +125,7 @@ export class YouTubeAssembler implements Assembler {
       this.video,
       this.canvas,
       this.anchorButtonElement,
-      () => this.chatContainer,
+      () => this.chatSource,
       [this.chatWindowContainer1, this.chatWindowContainer2],
       this.globalDocuments,
       this.playerSettings,

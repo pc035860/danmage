@@ -98,15 +98,28 @@ export class StructuredChatPool implements ChatPool {
   }
 }
 
-// Reads from whichever chat container is current, so the container can come
-// and go (YouTube blanks and rebuilds its chat iframe) without tearing down
-// everything that depends on this pool.
+// Where the chat is read from right now. The source can come and go (YouTube
+// blanks and rebuilds its chat iframe) without tearing down everything that
+// depends on the pool.
+export interface ChatSource {
+  container: Element;
+  // A replay chat replaces its whole list whenever the video seeks, so
+  // everything in the container right after a rebuild is history rather than
+  // new chat.
+  skipRebuilds: boolean;
+  // True while a replay chat is still appending the messages it skipped over
+  // after a seek.
+  isCatchingUp: () => boolean;
+}
+
+export const NEVER_CATCHING_UP = (): boolean => false;
+
 export class SwitchingChatPool implements ChatPool {
-  private container: Element | null = null;
+  private source: ChatSource | null = null;
   private pool: OnPageChatPool | undefined;
 
   public constructor(
-    private getChatContainer: () => Element | null,
+    private getChatSource: () => ChatSource | null,
     private blockTester: BlockPatternTester,
     private backlogWindow: number,
     private now: () => number = () => Date.now(),
@@ -121,28 +134,46 @@ export class SwitchingChatPool implements ChatPool {
   }
 
   public start(): void {
-    this.syncContainer();
+    this.syncSource();
     this.pool?.start();
   }
 
   public read(): Array<ChatEntry> {
-    this.syncContainer();
-    return this.pool ? this.pool.read() : [];
+    this.syncSource();
+    if (!this.pool) {
+      return [];
+    }
+    // Checked per read rather than on the source change: the chat appends the
+    // whole skipped range within a frame or two of the seek, well before the
+    // source is queried again.
+    if (this.source.isCatchingUp()) {
+      this.pool.skipToEnd();
+      return [];
+    }
+    return this.pool.read();
   }
 
-  private syncContainer(): void {
-    let container = this.getChatContainer();
-    if (container === this.container) {
+  private syncSource(): void {
+    let source = this.getChatSource();
+    // `isCatchingUp` is deliberately not compared: it is read on every read()
+    // instead, and both sources hand out a stable reference (a module constant
+    // or a class property), so a new closure per call would recreate the pool
+    // on every poll.
+    if (
+      source?.container === this.source?.container &&
+      source?.skipRebuilds === this.source?.skipRebuilds
+    ) {
       return;
     }
-    this.container = container;
+    this.source = source;
     this.pool?.dispose();
-    this.pool = container
+    this.pool = source
       ? new OnPageChatPool(
-          container,
+          source.container,
           this.blockTester,
           this.backlogWindow,
           this.now,
+          source.skipRebuilds,
         )
       : undefined;
     this.pool?.start();
@@ -166,6 +197,7 @@ export class OnPageChatPool implements ChatPool {
     private blockTester: BlockPatternTester,
     private backlogWindow = 0, // ms
     private now: () => number = () => Date.now(),
+    private skipRebuilds = false,
   ) {
     this.createdAt = this.now();
     if (this.backlogWindow > 0) {
@@ -189,7 +221,7 @@ export class OnPageChatPool implements ChatPool {
     return this.now() - this.createdAt < this.backlogWindow;
   }
 
-  private skipToEnd(): void {
+  public skipToEnd(): void {
     let lastElement = this.chatContainer.lastElementChild;
     if (lastElement) {
       this.logElementPointer = lastElement;
@@ -215,8 +247,16 @@ export class OnPageChatPool implements ChatPool {
     }
 
     let nextLogElementPointer: Element;
-    if (this.chatContainer.contains(this.logElementPointer)) {
+    if (
+      this.logElementPointer &&
+      this.chatContainer.contains(this.logElementPointer)
+    ) {
       nextLogElementPointer = this.logElementPointer.nextElementSibling;
+    } else if (this.skipRebuilds) {
+      // The list was rebuilt, which for a replay chat means the video seeked.
+      // Whatever is in it now is history.
+      this.skipToEnd();
+      return [];
     } else {
       nextLogElementPointer = this.chatContainer.firstElementChild;
     }

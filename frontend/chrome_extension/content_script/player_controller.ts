@@ -3,6 +3,7 @@ import { PlayerSettings } from "../../../interface/player_settings";
 import { newGetChatRequest, newPostChatRequest } from "../../client_requests";
 import {
   ChatPool,
+  ChatSource,
   OnPageChatPool,
   StructuredChatPool,
   SwitchingChatPool,
@@ -77,7 +78,7 @@ export class PlayerController {
     video: HTMLVideoElement,
     canvas: HTMLElement,
     anchorButtonElement: Element,
-    getChatContainer: () => Element | null,
+    getChatSource: () => ChatSource | null,
     chatWindowContainers: Array<HTMLElement>,
     globalDocuments: GlobalDocuments,
     playerSettings: PlayerSettings,
@@ -108,7 +109,7 @@ export class PlayerController {
       controlPanel,
       ControlPanelOneTimeAttacher.create(controlPanel, anchorButtonElement),
       new SwitchingChatPool(
-        getChatContainer,
+        getChatSource,
         blockPatternTester,
         PlayerController.YOUTUBE_CHAT_BACKLOG_WINDOW,
       ),

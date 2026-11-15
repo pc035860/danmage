@@ -1,14 +1,18 @@
 import { ChatEntry } from "../../../interface/chat_entry";
-import { SwitchingChatPool } from "./chat_pool";
+import {
+  ChatSource,
+  NEVER_CATCHING_UP,
+  SwitchingChatPool,
+} from "./chat_pool";
 import { MockBlockPatternTester } from "./common/mocks";
 import { TEST_RUNNER } from "@selfage/puppeteer_test_runner";
 import { assertThat, eq, isArray } from "@selfage/test_matcher";
 
 class Fixture {
   public time = 0;
-  public current: Element | null = null;
+  public source: ChatSource | null = null;
   public pool = new SwitchingChatPool(
-    () => this.current,
+    () => this.source,
     new (class extends MockBlockPatternTester {
       public test() {
         return false;
@@ -17,6 +21,14 @@ class Fixture {
     2000,
     () => this.time,
   );
+
+  public setContainer(
+    container: Element,
+    skipRebuilds = false,
+    isCatchingUp = NEVER_CATCHING_UP,
+  ): void {
+    this.source = { container, skipRebuilds, isCatchingUp };
+  }
 
   public createContainer(...messages: Array<string>): Element {
     let container = document.createElement("div");
@@ -44,7 +56,7 @@ TEST_RUNNER.run({
         // Prepare
         let fixture = new Fixture();
         let container = fixture.createContainer("old");
-        fixture.current = container;
+        fixture.setContainer(container);
         fixture.pool.start();
         fixture.time = 2500;
         fixture.addMessage(container, "new 1");
@@ -69,11 +81,11 @@ TEST_RUNNER.run({
         // Prepare
         let fixture = new Fixture();
         let oldContainer = fixture.createContainer("old");
-        fixture.current = oldContainer;
+        fixture.setContainer(oldContainer);
         fixture.pool.start();
         fixture.time = 3000;
         let newContainer = fixture.createContainer("backlog 1", "backlog 2");
-        fixture.current = newContainer;
+        fixture.setContainer(newContainer);
 
         // Execute
         let readedAtSwitch = fixture.pool.read();
@@ -96,16 +108,16 @@ TEST_RUNNER.run({
       execute: () => {
         // Prepare
         let fixture = new Fixture();
-        fixture.current = fixture.createContainer("old");
+        fixture.setContainer(fixture.createContainer("old"));
         fixture.pool.start();
-        fixture.current = null;
+        fixture.source = null;
 
         // Execute
         fixture.time = 1000;
         let readedWithoutContainer = fixture.pool.read();
         fixture.time = 3000;
         let container = fixture.createContainer("backlog");
-        fixture.current = container;
+        fixture.setContainer(container);
         let readedAtRecovery = fixture.pool.read();
         fixture.time = 5500;
         fixture.addMessage(container, "live");
@@ -133,7 +145,7 @@ TEST_RUNNER.run({
         fixture.pool.start();
         fixture.time = 3000;
         let container = fixture.createContainer("backlog");
-        fixture.current = container;
+        fixture.setContainer(container);
         fixture.pool.read();
         fixture.time = 5500;
         fixture.addMessage(container, "live");
@@ -143,6 +155,93 @@ TEST_RUNNER.run({
 
         // Verify
         assertThat(contents(readed), isArray([eq("live")]), "read contents");
+      },
+    },
+    {
+      name: "SwitchesToAReplayChatAndSkipsItsRebuiltList",
+      execute: () => {
+        // Prepare
+        let fixture = new Fixture();
+        let container = fixture.createContainer("old");
+        fixture.setContainer(container);
+        fixture.pool.start();
+        fixture.time = 3000;
+        fixture.addMessage(container, "live");
+        assertThat(
+          contents(fixture.pool.read()),
+          isArray([eq("live")]),
+          "read before switching",
+        );
+        fixture.setContainer(container, true);
+
+        // Execute
+        fixture.time = 3000;
+        fixture.pool.read();
+        fixture.time = 5500;
+        fixture.addMessage(container, "after switch");
+        let readedAfterSwitch = fixture.pool.read();
+        container.innerHTML = "";
+        fixture.addMessage(container, "rebuilt 1");
+        fixture.addMessage(container, "rebuilt 2");
+        let readedAfterRebuild = fixture.pool.read();
+        fixture.addMessage(container, "live again");
+        let readedLive = fixture.pool.read();
+
+        // Verify
+        assertThat(
+          contents(readedAfterSwitch),
+          isArray([eq("after switch")]),
+          "read after switch",
+        );
+        assertThat(
+          contents(readedAfterRebuild),
+          isArray([]),
+          "read after rebuild",
+        );
+        assertThat(
+          contents(readedLive),
+          isArray([eq("live again")]),
+          "read live",
+        );
+      },
+    },
+    {
+      name: "SkipsWhileTheChatIsCatchingUp",
+      execute: () => {
+        // Prepare
+        let fixture = new Fixture();
+        let catchingUp = false;
+        let container = fixture.createContainer("old");
+        fixture.setContainer(container, false, () => catchingUp);
+        fixture.pool.start();
+        fixture.time = 3000;
+        fixture.addMessage(container, "live");
+        assertThat(
+          contents(fixture.pool.read()),
+          isArray([eq("live")]),
+          "read before catch up",
+        );
+
+        // Execute
+        catchingUp = true;
+        fixture.addMessage(container, "skipped 1");
+        fixture.addMessage(container, "skipped 2");
+        let readedCatchingUp = fixture.pool.read();
+        catchingUp = false;
+        fixture.addMessage(container, "live again");
+        let readedAfterCatchUp = fixture.pool.read();
+
+        // Verify
+        assertThat(
+          contents(readedCatchingUp),
+          isArray([]),
+          "read catching up",
+        );
+        assertThat(
+          contents(readedAfterCatchUp),
+          isArray([eq("live again")]),
+          "read after catch up",
+        );
       },
     },
   ],
