@@ -17,6 +17,7 @@ import {
   FONT_WEIGHT_RANGE,
   OPACITY_RANGE,
   SHOW_CHAT_WINDOW_DEFAULT,
+  SHOW_TIMESTAMP_DEFAULT,
   SHOW_USER_NAME_DEFAULT,
   SPEED_RANGE,
   TOP_MARGIN_RANGE,
@@ -115,6 +116,10 @@ export class PlayerSettingsStorage {
       remotePlayerSettings?.displaySettings?.showChatWindow ??
       localPlayerSettings?.displaySettings?.showChatWindow ??
       SHOW_CHAT_WINDOW_DEFAULT;
+    displaySettings.showTimestamp =
+      remotePlayerSettings?.displaySettings?.showTimestamp ??
+      localPlayerSettings?.displaySettings?.showTimestamp ??
+      SHOW_TIMESTAMP_DEFAULT;
 
     let blockSettings = playerSettings.blockSettings;
     let mergedPatterns = [
@@ -140,9 +145,23 @@ export class PlayerSettingsStorage {
     );
     await this.serviceClient.send(
       newUpdatePlayerSettingsRequest({
-        playerSettings,
+        playerSettings:
+          PlayerSettingsStorage.withoutLocalOnlyFields(playerSettings),
       }),
     );
+  }
+
+  // The backend deserializes by field index and throws on one it doesn't know,
+  // which would fail the whole update. Keep showTimestamp local until the
+  // deployed backend knows it.
+  private static withoutLocalOnlyFields(
+    playerSettings: PlayerSettings,
+  ): PlayerSettings {
+    if (!playerSettings.displaySettings) {
+      return playerSettings;
+    }
+    let { showTimestamp, ...displaySettings } = playerSettings.displaySettings;
+    return { ...playerSettings, displaySettings };
   }
 }
 

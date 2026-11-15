@@ -15,6 +15,7 @@ import {
   FONT_WEIGHT_RANGE,
   OPACITY_RANGE,
   SHOW_CHAT_WINDOW_DEFAULT,
+  SHOW_TIMESTAMP_DEFAULT,
   SHOW_USER_NAME_DEFAULT,
   SPEED_RANGE,
   TOP_MARGIN_RANGE,
@@ -51,6 +52,7 @@ export class DisplaySettingsTab extends EventEmitter {
   private fontFamilyOption = new Ref<TextInput>();
   private distributionOption = new Ref<Dropdown<DistributionStyle>>();
   private showUsernameOption = new Ref<SwitchCheckbox>();
+  private showTimestampOption = new Ref<SwitchCheckbox>();
   private resetButton = new Ref<HTMLDivElement>();
 
   public constructor(private displaySettings: DisplaySettings) {
@@ -178,6 +180,14 @@ export class DisplaySettingsTab extends EventEmitter {
           displaySettings.showUserName,
         ),
       ).body,
+      assign(
+        this.showTimestampOption,
+        SwitchCheckbox.create(
+          chrome.i18n.getMessage("timestampOption"),
+          SHOW_TIMESTAMP_DEFAULT,
+          displaySettings.showTimestamp,
+        ),
+      ).body,
       E.div(
         {
           class: "display-settings-tab-reset-entry",
@@ -238,6 +248,9 @@ export class DisplaySettingsTab extends EventEmitter {
     );
     this.showUsernameOption.val.on("change", (value) =>
       this.showUserNameChange(value),
+    );
+    this.showTimestampOption.val.on("change", (value) =>
+      this.showTimestampChange(value),
     );
     this.distributionOption.val.on("change", (value) =>
       this.distributionStyleChange(value),
@@ -306,6 +319,11 @@ export class DisplaySettingsTab extends EventEmitter {
     this.emit("update");
   }
 
+  public showTimestampChange(value: boolean): void {
+    this.displaySettings.showTimestamp = value;
+    this.emit("update");
+  }
+
   public distributionStyleChange(value: DistributionStyle): void {
     this.displaySettings.distributionStyle = value;
     this.emit("update");
@@ -331,6 +349,7 @@ export class DisplaySettingsTab extends EventEmitter {
     this.displaySettings.enableInteraction =
       this.enableInteractionOption.val.reset();
     this.displaySettings.showChatWindow = this.showChatWindowOption.val.reset();
+    this.displaySettings.showTimestamp = this.showTimestampOption.val.reset();
     this.emit("update");
   }
 

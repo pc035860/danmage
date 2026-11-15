@@ -15,3 +15,4 @@ export let DISTRIBUTION_STYLE_DEFAULT =
   DistributionStyle.RandomDistributionStyle;
 export let ENABLE_CHAT_INTERACTION_DEFAULT = false;
 export let SHOW_CHAT_WINDOW_DEFAULT = true;
+export let SHOW_TIMESTAMP_DEFAULT = true;

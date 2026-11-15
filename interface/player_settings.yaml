@@ -70,6 +70,9 @@
     - name: showChatWindow
       type: boolean
       index: 13
+    - name: showTimestamp
+      type: boolean
+      index: 14
 - kind: Message
   name: PlayerSettings
   fields:

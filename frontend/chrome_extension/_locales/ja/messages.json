@@ -47,6 +47,9 @@
   "userNameOption": {
     "message": "ユーザー名の表示／非表示"
   },
+  "timestampOption": {
+    "message": "タイムスタンプの表示／非表示（Twitch）"
+  },
   "distributionStyleOption": {
     "message": "コメントの分布方法"
   },

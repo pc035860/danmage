@@ -47,6 +47,9 @@
   "userNameOption": {
     "message": "显示/隐藏用户名"
   },
+  "timestampOption": {
+    "message": "显示/隐藏时间戳（Twitch）"
+  },
   "distributionStyleOption": {
     "message": "弹幕分布方法"
   },

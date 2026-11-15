@@ -63,6 +63,10 @@
     "message": "Show/Hide user name",
     "description": "Explain the option to show or hide user name."
   },
+  "timestampOption": {
+    "message": "Show/Hide timestamp (Twitch)",
+    "description": "Explain the option to show or hide the chat timestamp on Twitch."
+  },
   "distributionStyleOption": {
     "message": "Method to distribute chats",
     "description": "Explain the option to choose distribution style."

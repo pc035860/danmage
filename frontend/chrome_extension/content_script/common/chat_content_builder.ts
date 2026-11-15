@@ -255,6 +255,7 @@ export class TwitchChatContentBuilder implements ChatContentBuilder {
       `> </`,
     );
     this.removeUserName(template);
+    this.removeTimestamp(template);
     return template.innerHTML;
   }
 
@@ -267,6 +268,12 @@ export class TwitchChatContentBuilder implements ChatContentBuilder {
     );
     removeSelectedChildElements(
       template.content.querySelectorAll(".chat-author__intl-login"),
+    );
+  }
+
+  private removeTimestamp(template: HTMLTemplateElement): void {
+    removeSelectedChildElements(
+      template.content.querySelectorAll(".chat-line__timestamp"),
     );
   }
 
@@ -310,6 +317,9 @@ export class TwitchChatContentBuilder implements ChatContentBuilder {
     removeSelectedChildElements(
       template.content.querySelectorAll(".vod-message__header"),
     );
+    if (!displaySettings.showTimestamp) {
+      this.removeTimestamp(template);
+    }
     setStyleForSelectedChildElements(
       template.content.querySelectorAll(".vod-message"),
       { padding: "0px" },

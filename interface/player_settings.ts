@@ -78,6 +78,7 @@ export interface DisplaySettings {
   distributionStyle?: DistributionStyle,
   enableInteraction?: boolean,
   showChatWindow?: boolean,
+  showTimestamp?: boolean,
 }
 
 export let DISPLAY_SETTINGS: MessageDescriptor<DisplaySettings> = {
@@ -133,6 +134,10 @@ export let DISPLAY_SETTINGS: MessageDescriptor<DisplaySettings> = {
   }, {
     name: 'showChatWindow',
     index: 13,
+    primitiveType: PrimitiveType.BOOLEAN,
+  }, {
+    name: 'showTimestamp',
+    index: 14,
     primitiveType: PrimitiveType.BOOLEAN,
   }],
 };
