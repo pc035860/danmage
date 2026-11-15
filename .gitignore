@@ -9,3 +9,4 @@ chrome_extension_bin/
 *.html
 *.gz
 *.zip
+specs/handover/
